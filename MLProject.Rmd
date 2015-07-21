@@ -1,0 +1,186 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+---
+title: "Practical Machine Learning Course Project"
+author: "FP"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    keep_md: true
+    toc: false
+    theme: united
+
+---
+
+
+This project uses data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.   More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+
+### Describe how model was built 
+Given limited time for this project, I've decided to exclude all columns with NA values and other not helpful non-numeric and near zero value columns.  The starting training data set has 53 variables including an outcome classe. I've then partion this data set 70/30% for training and testing.  The first prediction model was created using Decision Trees and the second model using the Random Forests. 
+
+### Model Selection and Test Result
+Although the Ranodom Forest model took much longer, I've selected this model for higher accuracy of 99.47% vs 73.15% for Decision Trees.   All 20 different test cases predicted using the Random Forests model submitted had "correct" feedbacks.
+ 
+
+### Load Libraries
+```{r message=FALSE}
+library(caret)
+library(rpart)
+library(randomForest)
+library(ggplot2)
+```
+
+### Load Data
+```{r}
+pmlTrain <- read.csv("pml-training.csv", na.strings=c("NA", "", "#DIV/0!"), stringsAsFactors=FALSE)
+pmlTest <- read.csv("pml-testing.csv", na.strings=c("NA", "", "#DIV/0!"), stringsAsFactors=FALSE)
+colNames <- colnames(pmlTrain)
+```
+
+
+### pre-process training set
+```{r}
+# find columns with NA
+naSum <- apply(pmlTrain,2,function(x) cnt=sum(is.na(x)))
+colNa <- naSum[naSum > 0]
+colNaNames <- attr(colNa, "name")
+
+# exclude first 7 not helpful columns
+colExclude <- c(colNaNames,colNames[1:7])
+
+# get columns to include in training set
+colInclude <- setdiff(colNames, colExclude)
+
+# build traing set
+features <- subset(pmlTrain, select=c(colInclude))
+features$classe <- as.factor(features$classe)
+
+```
+
+
+### Splitting data set by Trainining and Test Sets
+```{r}
+# partion training/test data 70/30 percent
+set.seed(123)
+inTrain <- createDataPartition(y=features$classe,
+                               p=0.7, list=FALSE)
+training <- features[inTrain,]
+testing <- features[-inTrain,]
+
+table(training$classe)
+
+
+```
+
+### Remove any Near Zero Variance Variables
+```{r}
+nzv <- nearZeroVar(training, saveMetrics=TRUE)
+training <- training[,nzv$nzv==FALSE]
+qplot(roll_dumbbell, color=classe, data=training, geom="density", main="Training Data Density Plot")
+
+```
+
+### Train with Decision Trees 
+```{r}
+set.seed(123)
+fitDT <- rpart(classe ~ ., data=training, method="class")
+
+```
+
+### Predict Testing Set with Decision Trees
+```{r}
+predDT <- predict(fitDT, testing, type="class")
+confusionMatrix(predDT, testing$classe)
+
+```
+
+
+### Predict roll_belt, roll_dumbbell with Decision Trees
+```{r}
+# create variable to use for ploting 
+testing$predRight <- predDT == testing$classe
+qplot(roll_belt, roll_dumbbell, color=predRight, data=testing, 
+      main="Predicting with Decision Trees")
+
+```
+
+### Train with Random Forests
+```{r}
+# free memory, random forest is gobbling up memory and cpu
+# rm(pmlTrain)
+
+set.seed(123)
+fitRF <- randomForest(classe ~., data=training, type="class", importance=TRUE)
+summary(fitRF)
+
+```
+
+### Random Forest Cross-Validation
+```{r}
+# set.seed(123)
+# cv <- rfcv(training[,1:52], training$classe)
+# with(cv, plot(n.var, error.cv, log="x", type="o", lwd=2))
+
+```
+
+
+### Calculate Variable Importance
+```{r fig.height=12}
+varImpPlot(fitRF)
+
+```
+
+
+### Predict with Random Forests
+```{r}
+set.seed(123)
+predRF <- predict(fitRF, testing, type="class")
+confusionMatrix(predRF, testing$classe)
+
+```
+
+### Predict roll_belt, roll_dumbbell with Random forests
+```{r}
+# create variable to use for ploting 
+testing$predRight <- predRF == testing$classe
+qplot(roll_belt, roll_dumbbell, color=predRight, data=testing, main="Predicting with Random Forest")
+
+
+```
+
+### Expected Out of Sample Error
+```{r}
+OutOfSampleErrorPercent <- round(sum(predRF != testing$classe)/length(predRF),4) * 100
+paste0("Out Of Sample Error: ", OutOfSampleErrorPercent, "%")
+
+```
+
+### Part II - Prediction Result using the Random Forests Model
+```{r eval=TRUE}
+
+answers <- predict(fitRF, pmlTest, type="class")
+summary(answers)
+```
+
+
+```{r eval=FALSE}
+wd <- getwd()
+#### write out to file
+setwd("predictions")
+pml_write_files(answers)
+
+### reset work directory
+setwd(wd)
+
+#  code reuse
+pml_write_files = function(x){
+    n = length(x)
+    
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
